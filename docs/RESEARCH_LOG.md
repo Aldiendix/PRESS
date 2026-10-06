@@ -268,3 +268,25 @@ with a table trained on 40–73. Baseline: A 0.4877, B 0.4174.
 v4 stands. No method from this sweep improves it. A real step up needs either an embedding near teacher quality
 (not reachable in ~77 KB with any model tried) or a way to predict reference noise (not predictable from our
 space by any of ~20 signals).
+
+## 2026-10-07 — two "big step" hypotheses, both rejected
+
+**1. Noise as a learnable property of the text (arXiv).** 110 real teacher-pipeline runs over a fixed pool of
+30,000 public 2026 titles (each title seen ~18 times):
+- A title that is noise in one sample is noise in another 52% of the time (28% otherwise; base rate 36%).
+- Same-cluster pairs stay together 63% of the time.
+- Upper bound: the title's true noise frequency over the other runs predicts a held-out run with AUC 0.79;
+  precision 0.75 / 0.70 / 0.66 / 0.62 at the top 5 / 10 / 20 / 30%. Only 1.2% of titles are noise in ≥ 90% of runs.
+- A shared noise cluster needs ≥ 0.7 precision at ~30% volume, and a packed model predicting this from text
+  would sit far below the oracle (text-only detectors reached AUC 0.66–0.70). Rejected.
+
+**2. Context across the round's four calls.** The server process stays alive between `/cluster` calls, so texts
+from earlier social subsets could join the neighbour smoothing and self-training of later ones.
+| Variant | Set A | Set B | Set C |
+|---|---|---|---|
+| No context (current) | 0.5310 | 0.4239 | 0.5782 |
+| Earlier subsets as context, same k | 0.5236 | 0.4206 | 0.5685 |
+| Context with k × 1.5 / k scaled to the pooled size | 0.5234 / 0.5207 | 0.4225 / 0.4214 | 0.5670 / 0.5679 |
+
+Extra points from sibling subsets make every later subset worse: the reference structure is specific to each
+5,000-text sample. Rejected.
