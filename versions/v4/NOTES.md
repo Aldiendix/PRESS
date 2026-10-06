@@ -19,3 +19,6 @@
 - Official top of round 74 was 0.3996.
 - The shipped table has seen rounds 40–74, so it has no unseen-round score yet.
 - Not yet submitted to Apex; no official score.
+
+**Rebuilding with a newer round:** `tools/make_version.sh <N> <last finished round>` fetches the round, retrains the
+table on rounds 40..last with this recipe and writes `versions/vN/solution.py`.

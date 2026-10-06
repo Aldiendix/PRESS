@@ -39,7 +39,7 @@ if __name__ == "__main__":
     ap.add_argument("--tern", type=float, default=0.0, help="ternary QAT threshold (x mean|W| per dim); 0 = float")
     ap.add_argument("--noise_neg", type=int, default=1, help="use GT-noise points as negatives in the label loss"); ap.add_argument("--nz", type=float, default=0.0, help="target non-zero fraction (overrides --tern threshold)"); ap.add_argument("--idf", type=int, default=0); ap.add_argument("--rows", type=int, default=0, help="per-row scale levels (0=off)")
     ap.add_argument("--l1", type=float, default=0.0); ap.add_argument("--only", default="all"); ap.add_argument("--extra", type=int, nargs=2, default=None, help="extra (synthetic) round range"); ap.add_argument("--nz_start", type=float, default=0.0, help="anneal non-zero share from this value"); ap.add_argument("--anneal", type=float, default=0.6, help="fraction of steps over which to anneal")
-    ap.add_argument("--proto", type=float, default=0.0, help="weight of a prototype (cluster-centroid) loss"); ap.add_argument("--drop", type=float, default=0.0, help="n-gram dropout probability"); ap.add_argument("--wd", type=float, default=0.0); ap.add_argument("--half", type=float, default=0.0, help="recency half-life in rounds for subset sampling (0 = uniform)"); ap.add_argument("--nu", type=float, default=0.0, help="isolation loss for ground-truth noise points"); ap.add_argument("--pool", type=float, default=0.0, help="probability of a teacher-only batch drawn from the arXiv title pool"); ap.add_argument("--pooln", type=int, default=240000); ap.add_argument("--seed", type=int, default=0); ap.add_argument("--sm", type=int, default=0, help="in-loop k-NN smoothing iterations"); ap.add_argument("--smk", type=int, default=6); ap.add_argument("--sma", type=float, default=0.4)
+    ap.add_argument("--proto", type=float, default=0.0, help="weight of a prototype (cluster-centroid) loss"); ap.add_argument("--drop", type=float, default=0.0, help="n-gram dropout probability"); ap.add_argument("--wd", type=float, default=0.0); ap.add_argument("--half", type=float, default=0.0, help="recency half-life in rounds for subset sampling (0 = uniform)"); ap.add_argument("--nu", type=float, default=0.0, help="isolation loss for ground-truth noise points"); ap.add_argument("--pool", type=float, default=0.0, help="probability of a teacher-only batch drawn from the arXiv title pool"); ap.add_argument("--pooln", type=int, default=240000); ap.add_argument("--boost_last", type=float, default=1.0, help="sampling weight multiplier for the newest round"); ap.add_argument("--boost_n", type=int, default=1); ap.add_argument("--kd", default="", help="float table to distil from"); ap.add_argument("--kdw", type=float, default=1.0); ap.add_argument("--ema", type=float, default=0.0, help="average the latent weights over the last part of training (decay)"); ap.add_argument("--seed", type=int, default=0); ap.add_argument("--sm", type=int, default=0, help="in-loop k-NN smoothing iterations"); ap.add_argument("--smk", type=int, default=6); ap.add_argument("--sma", type=float, default=0.4)
     ap.add_argument("--smw", type=float, default=0.5, help="weight of the un-smoothed loss when --sm is on"); ap.add_argument("--out", required=True); ap.add_argument("--threads", type=int, default=6)
     a = ap.parse_args(); torch.set_num_threads(a.threads); torch.manual_seed(a.seed); rng = np.random.default_rng(a.seed)
     fs = files_for(range(a.train[0], a.train[1] + 1)) + (files_for(range(a.extra[0], a.extra[1] + 1)) if a.extra else []); S = [load_subset(f, a.fw, a.fc, a.idf) for f in fs]
@@ -59,11 +59,13 @@ if __name__ == "__main__":
     def rowq():   # per-row scale on a half-octave grid, straight-through
         k = torch.clamp(torch.round(2 * g), -(a.rows // 2), a.rows - a.rows // 2 - 1); return torch.exp2((g + (k / 2 - g).detach()))
     cur_nz = [a.nz]
+    EMA = None
+    KD = torch.from_numpy(np.load(a.kd)) if a.kd else None
     if a.pool:   # pool of arXiv titles with teacher embeddings; batch IDF is applied per sampled batch
         PX = sp.hstack([fold(sp.load_npz("cache/pool.w.npz")[:a.pooln], a.fw), fold(sp.load_npz("cache/pool.c.npz")[:a.pooln], a.fc)]).tocsr(); PX.sum_duplicates(); PX.data = np.log1p(PX.data)
         PT = np.load("cache/arxiv_pool.f16.npy", mmap_mode="r"); print("pool", PX.shape, flush=True)
     rnds = np.array([int(s_["name"].split("_")[1]) for s_ in S]); rnds = np.where(rnds > 9000, a.train[1], rnds)
-    pw = np.exp2(-(a.train[1] - rnds) / a.half) if a.half else np.ones(len(S)); pw = pw / pw.sum()
+    pw = np.exp2(-(a.train[1] - rnds) / a.half) if a.half else np.ones(len(S)); pw = pw * np.where(rnds > a.train[1] - a.boost_n, a.boost_last, 1.0); pw = pw / pw.sum()
     t0 = time.time(); ema = None
     for step in range(a.steps):
         if a.nz_start:
@@ -104,6 +106,9 @@ if __name__ == "__main__":
                 okp = cnt[inv] > 1; loss = loss + a.proto * Fn.cross_entropy(lg[okp], inv[okp])
             return loss
         loss = objective(z)
+        if KD is not None:   # match the float table's similarity structure on this batch
+            with torch.no_grad(): zt = Fn.normalize(torch.sparse.mm(to_torch(Xb), KD), dim=1); tl = (zt @ zt.T / 0.05).masked_fill(eye, -1e9)
+            lg_ = (z @ z.T / a.tau).masked_fill(eye, -1e9); loss = loss + a.kdw * -(torch.softmax(tl, 1) * (lg_ - torch.logsumexp(lg_, 1, keepdim=True))).sum(1).mean()
         if a.sm:   # the pipeline clusters k-NN-smoothed vectors: train through the same smoothing
             nb = (z @ z.T).detach().masked_fill(eye, -1e9).topk(a.smk, dim=1).indices; zs = z
             for _ in range(a.sm): zs = Fn.normalize((1 - a.sma) * zs + a.sma * zs[nb].mean(1), dim=1)
@@ -111,8 +116,12 @@ if __name__ == "__main__":
         if a.l1: loss = loss + a.l1 * W.abs().mean()
         if a.wd: loss = loss + a.wd * (W ** 2).mean()
         opt.zero_grad(); loss.backward(); opt.step(); sched.step()
+        if a.ema and step >= int(a.steps * 0.6):
+            EMA = [W.detach().clone(), scale.detach().clone(), g.detach().clone()] if EMA is None else [a.ema * e + (1 - a.ema) * p_.detach() for e, p_ in zip(EMA, (W, scale, g))]
         ema = loss.item() if ema is None else 0.98 * ema + 0.02 * loss.item()
         if step % 500 == 0 or step == a.steps - 1: print(step, "loss %.4f" % ema, "%.0fs" % (time.time() - t0), flush=True)
+    if EMA is not None:
+        with torch.no_grad(): W.copy_(EMA[0]); scale.copy_(EMA[1]); g.copy_(EMA[2])
     if a.tern or a.nz:
         q = quant(W)[1].detach().numpy().astype(np.int8); sc_ = scale.detach().numpy().astype(np.float32)
         np.save(a.out.replace(".npy", ".q.npy"), q); np.save(a.out.replace(".npy", ".s.npy"), sc_)

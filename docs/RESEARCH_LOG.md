@@ -290,3 +290,22 @@ from earlier social subsets could join the neighbour smoothing and self-training
 
 Extra points from sibling subsets make every later subset worse: the reference structure is specific to each
 5,000-text sample. Rejected.
+
+## 2026-10-06/07 — preparing round 76
+
+Bench baseline (v4 settings): A 0.4877, B 0.4174, C 0.5234. Nothing below improves on v4.
+
+| Tried | Result |
+|---|---|
+| 19 fine-tuning variants of self-training (classes 60–250, α 3–30, weight 0.5–1.3, training-set rules, 2–3 granularities), density k, singleton share, cluster count | no variant wins on all three sets; all within ±0.003 or worse |
+| Low-density points in groups of ~1.5–5, merged by distance, or by a fine cut of the tree, instead of singletons | −0.002 to −0.03; pure singletons are best |
+| Boosting the newest round ×5, or the newest three ×3, in training | round 73: 0.5175 vs 0.5203; round 74: 0.4153 / 0.4135 vs 0.4140 |
+| Distilling the float table into the sparse table (similarity matching, weight 1 / 3) | 0.4822 / 0.4761 vs 0.4839 |
+| Averaging the latent weights over the last 40% of training (decay 0.99 / 0.999) | 0.4811 / 0.4766 vs 0.4839 |
+
+**Recency, measured more precisely (round 74, v4 settings):** trained through round 72: 0.4092; through round 73:
+0.4140. Each newer round in training is worth about +0.005 on the next round. Consecutive rounds share almost no
+near-duplicate texts (0.4% of round-74 social texts have a cosine ≥ 0.8 match in round 73), so this is topical
+drift, not repetition.
+
+**Plan for round 76:** `tools/make_version.sh 5 75` as soon as round 75's data is public (~15:30 UTC).
