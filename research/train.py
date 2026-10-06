@@ -6,7 +6,11 @@ import argparse, glob, os, time, numpy as np, pandas as pd, scipy.sparse as sp, 
 from sklearn.preprocessing import normalize
 
 def fold(M, F):
-    M = M.tocoo(); return sp.csr_matrix((M.data, (M.row, M.col % F)), shape=(M.shape[0], F))
+    M = M.tocoo()
+    if os.environ.get("HASH2"):   # second, independent bucket per n-gram (derived from the 2^20-bucket index)
+        c2 = ((M.col.astype(np.uint64) * np.uint64(2654435761)) >> np.uint64(11)) % np.uint64(F)
+        return sp.csr_matrix((np.concatenate([M.data, M.data]), (np.concatenate([M.row, M.row]), np.concatenate([M.col % F, c2.astype(np.int64)]))), shape=(M.shape[0], F))
+    return sp.csr_matrix((M.data, (M.row, M.col % F)), shape=(M.shape[0], F))
 
 def load_subset(f, FW, FC, idf=False):
     b = os.environ.get("FEAT", "cache/feat") + "/" + os.path.basename(f).replace(".parquet", "")
@@ -35,7 +39,7 @@ if __name__ == "__main__":
     ap.add_argument("--tern", type=float, default=0.0, help="ternary QAT threshold (x mean|W| per dim); 0 = float")
     ap.add_argument("--noise_neg", type=int, default=1, help="use GT-noise points as negatives in the label loss"); ap.add_argument("--nz", type=float, default=0.0, help="target non-zero fraction (overrides --tern threshold)"); ap.add_argument("--idf", type=int, default=0); ap.add_argument("--rows", type=int, default=0, help="per-row scale levels (0=off)")
     ap.add_argument("--l1", type=float, default=0.0); ap.add_argument("--only", default="all"); ap.add_argument("--extra", type=int, nargs=2, default=None, help="extra (synthetic) round range"); ap.add_argument("--nz_start", type=float, default=0.0, help="anneal non-zero share from this value"); ap.add_argument("--anneal", type=float, default=0.6, help="fraction of steps over which to anneal")
-    ap.add_argument("--seed", type=int, default=0); ap.add_argument("--sm", type=int, default=0, help="in-loop k-NN smoothing iterations"); ap.add_argument("--smk", type=int, default=6); ap.add_argument("--sma", type=float, default=0.4)
+    ap.add_argument("--proto", type=float, default=0.0, help="weight of a prototype (cluster-centroid) loss"); ap.add_argument("--drop", type=float, default=0.0, help="n-gram dropout probability"); ap.add_argument("--wd", type=float, default=0.0); ap.add_argument("--half", type=float, default=0.0, help="recency half-life in rounds for subset sampling (0 = uniform)"); ap.add_argument("--seed", type=int, default=0); ap.add_argument("--sm", type=int, default=0, help="in-loop k-NN smoothing iterations"); ap.add_argument("--smk", type=int, default=6); ap.add_argument("--sma", type=float, default=0.4)
     ap.add_argument("--smw", type=float, default=0.5, help="weight of the un-smoothed loss when --sm is on"); ap.add_argument("--out", required=True); ap.add_argument("--threads", type=int, default=6)
     a = ap.parse_args(); torch.set_num_threads(a.threads); torch.manual_seed(a.seed); rng = np.random.default_rng(a.seed)
     fs = files_for(range(a.train[0], a.train[1] + 1)) + (files_for(range(a.extra[0], a.extra[1] + 1)) if a.extra else []); S = [load_subset(f, a.fw, a.fc, a.idf) for f in fs]
@@ -55,13 +59,18 @@ if __name__ == "__main__":
     def rowq():   # per-row scale on a half-octave grid, straight-through
         k = torch.clamp(torch.round(2 * g), -(a.rows // 2), a.rows - a.rows // 2 - 1); return torch.exp2((g + (k / 2 - g).detach()))
     cur_nz = [a.nz]
+    rnds = np.array([int(s_["name"].split("_")[1]) for s_ in S]); rnds = np.where(rnds > 9000, a.train[1], rnds)
+    pw = np.exp2(-(a.train[1] - rnds) / a.half) if a.half else np.ones(len(S)); pw = pw / pw.sum()
     t0 = time.time(); ema = None
     for step in range(a.steps):
         if a.nz_start:
             fr_ = min(1.0, step / (a.anneal * a.steps)); cur_nz[0] = a.nz + (a.nz_start - a.nz) * (1 - fr_) ** 3
-        s = S[rng.integers(len(S))]; idx = rng.choice(s["X"].shape[0], a.bs, replace=False)
+        s = S[rng.choice(len(S), p=pw)]; idx = rng.choice(s["X"].shape[0], a.bs, replace=False)
         Wf = quant(W)[0] if (a.tern or a.nz) else W
-        z = Fn.normalize(torch.sparse.mm(to_torch(s["X"][idx]), Wf), dim=1)
+        Xb = s["X"][idx]
+        if a.drop:
+            Xb = Xb.copy(); Xb.data = Xb.data * (rng.random(len(Xb.data)) >= a.drop); Xb.eliminate_zeros(); Xb = normalize(Xb)
+        z = Fn.normalize(torch.sparse.mm(to_torch(Xb), Wf), dim=1)
         y = torch.from_numpy(s["y"][idx]); eye = torch.eye(a.bs, dtype=torch.bool)
         def objective(z):
             sim = z @ z.T
@@ -77,6 +86,11 @@ if __name__ == "__main__":
             if a.wx:
                 x = torch.from_numpy(s["xyz"][idx]); d2 = torch.cdist(x, x) ** 2; xl = (-d2 / 0.25).masked_fill(eye, -1e9)
                 loss = loss + a.wx * -(torch.softmax(xl, 1) * logp_all).sum(1).mean()
+            if a.proto:   # pull each point to its (leave-one-out) cluster centroid, away from other centroids
+                m = y >= 0; ids, inv = torch.unique(y[m], return_inverse=True); oh = Fn.one_hot(inv, len(ids)).float(); zm = z[m]
+                cnt = oh.sum(0); sums = oh.T @ zm; cen = Fn.normalize(sums, dim=1); lg = zm @ cen.T / a.tau
+                own = Fn.normalize(sums[inv] - zm, dim=1); lg = lg.scatter(1, inv[:, None], ((zm * own).sum(1) / a.tau)[:, None])
+                okp = cnt[inv] > 1; loss = loss + a.proto * Fn.cross_entropy(lg[okp], inv[okp])
             return loss
         loss = objective(z)
         if a.sm:   # the pipeline clusters k-NN-smoothed vectors: train through the same smoothing
@@ -84,6 +98,7 @@ if __name__ == "__main__":
             for _ in range(a.sm): zs = Fn.normalize((1 - a.sma) * zs + a.sma * zs[nb].mean(1), dim=1)
             loss = a.smw * loss + objective(zs)
         if a.l1: loss = loss + a.l1 * W.abs().mean()
+        if a.wd: loss = loss + a.wd * (W ** 2).mean()
         opt.zero_grad(); loss.backward(); opt.step(); sched.step()
         ema = loss.item() if ema is None else 0.98 * ema + 0.02 * loss.item()
         if step % 500 == 0 or step == a.steps - 1: print(step, "loss %.4f" % ema, "%.0fs" % (time.time() - t0), flush=True)

@@ -28,6 +28,7 @@ P_SOCIAL, P_TITLE = __P_SOCIAL__, __P_TITLE__
 MAXN = 6000
 # self-training: (first-pass clusters, ridge alpha, weight of classifier scores); None = off
 REFINE = __REFINE__
+REJOIN = __REJOIN__
 TABLE = "__TABLE__"
 _W = None
 _URL = re.compile(r"https?://\S+|www\.\S+")
@@ -135,7 +136,16 @@ def core(Z, p, docs=None):
         except Exception:
             docs = None
     lab = fcluster(link, max(2, min(S, n // 8)), "maxclust").astype(np.int64)
-    lab[out] = 10**6 + np.arange(len(out))
+    new = 10**6 + np.arange(len(out))
+    if REJOIN and len(out):  # a low-density point that sits almost on a cluster centroid goes back to that cluster
+        keep = np.ones(n, bool)
+        keep[out] = False
+        ids = np.unique(lab[keep])
+        cen = normalize(np.stack([Zs[keep & (lab == i)].mean(0) for i in ids]))
+        sim = Zs[out] @ cen.T
+        back = sim.max(1) >= REJOIN
+        new[back] = ids[sim.argmax(1)][back]
+    lab[out] = new
     return lab
 
 

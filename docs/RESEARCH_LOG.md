@@ -167,3 +167,54 @@ Round 74 ended; its data was not available to any solution below when it was bui
   self-training over v1 seen on rounds 69–73.
 - Subsets 1 and 2 had 26–27% noise and score low for everyone.
 - Round 75 opened at 15:30 UTC with a top score of 0.4410 (score to beat 0.4454); PRESS has not been submitted.
+
+## 2026-10-06 evening — after round 75 opened
+
+Round 75 leaderboard at 17:00 UTC: top 0.4518, with a cluster of new entries at 0.4475–0.4518 submitted from
+16:00 onward, shortly after v2/v3 became public in this repository.
+
+### Error decomposition of the pipeline (unseen rounds 69–73, baseline 0.4838)
+| Hypothetical | Score |
+|---|---|
+| My clusters, ground-truth noise known exactly (as one cluster) | 0.7535 |
+| Ground-truth clusters, my singleton choice | 0.6777 |
+| Ground-truth clusters, noise points labelled by my clusters | 0.7888 |
+| No singletons at all | 0.4700 |
+| Same number of singletons drawn at random with 100% noise precision | 0.4321 |
+| Shared `-1` cluster of that size at precision 0.6 / 0.7 / 0.85 | 0.4717 / 0.5064 / 0.5268 |
+
+- Most of the remaining loss is noise identification, but a shared noise cluster needs ≥ 0.7 precision at ~30%
+  volume; every signal tried reaches ~0.3 (a cross-validated GBM on 12 signals: AUC 0.705), and even re-running the
+  real teacher pipeline only agrees with the ground-truth noise at ~0.7 precision.
+- Density-based singletons work as abstention on badly clustered points (73% of them are noise or misassigned),
+  not as noise detection. A learned abstention ranker (logistic / GBM, AUC 0.79 for "noise or misassigned") scores
+  0.480–0.481, below the plain density rule.
+
+### Next-round protocol (train through round T, test on T+1)
+| Training rounds | Round 73 | Round 74 |
+|---|---|---|
+| 40–68 (five+ rounds stale) | 0.5135 | 0.3992 |
+| 40–T, uniform | 0.5165 | 0.4123 |
+| 55–T | 0.5161 | 0.4098 |
+| 40–T, recency half-life 6 rounds | 0.5084 | 0.4121 |
+
+- Including the newest rounds matters (+0.013 on round 74); weighting them more does not. Retrain every round.
+
+### Adopted in v4
+- Re-tuned cluster settings with self-training on: +0.0045 / +0.007 / +0.005 on the three unseen sets above.
+
+### No gain (all measured against 0.4838 on unseen rounds 69–73 unless noted)
+| Idea | Result |
+|---|---|
+| Two hash buckets per n-gram | 0.4808 |
+| 2,000-char context / word 3-grams / char 3–6-grams / plain char n-grams | 0.4825 / 0.4824 / 0.4813 / 0.4726 |
+| Prototype (cluster-centroid) loss | 0.4832 |
+| N-gram dropout 0.2 / 0.4 / 0.6 | 0.4766 / 0.4712 / 0.4589 |
+| Ridge regression from exact TF-IDF to the smoothed embedding, alone / with self-training | 0.4783 / 0.4850 |
+| Second self-training round with 150 classes; reassigning points by the classifier | 0.4844 / 0.4651 |
+| Ward / complete / weighted linkage, k-means, spectral, real UMAP + HDBSCAN on the self-trained embedding | 0.42 / 0.465 / 0.469 / 0.468 / 0.43 / 0.45 |
+| Smoothing k 15 / 30, α 0.5, 3 iterations (with v4 settings) | within ±0.002 |
+| Singleton re-attachment at cosine ≥ 0.95 on top of v4 settings | no additional gain |
+
+- The unquantized table reaches neighbour purity 0.82 on its training rounds and 0.70 on unseen rounds; the
+  ternary table 0.69 and 0.66. The sparse table is already the regularised version of the model.
