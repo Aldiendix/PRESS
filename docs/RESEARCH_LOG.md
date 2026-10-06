@@ -150,3 +150,20 @@ Round 73 is the only round both have not seen: 0.514 vs 0.495 (+3.8%). Round 74 
 
 Nothing adopted: the gains are inside the seed noise (~0.002). The leader's improvements are regime tuning on
 top of a weaker embedding; none of it addresses embedding quality, which is where PRESS is ahead.
+
+## 2026-10-06 15:40 UTC — round 74 (unseen by every model)
+
+Round 74 ended; its data was not available to any solution below when it was built.
+
+| Solution | subset 1 | subset 2 | subset 3 | arXiv | round |
+|---|---|---|---|---|---|
+| **PRESS v2** | 0.373 | 0.376 | 0.512 | 0.390 | **0.4126** |
+| PRESS v1 | 0.363 | 0.368 | 0.481 | 0.384 | 0.3990 |
+| Official top score of round 74 (`5H5t7Dkm` v4) | | | | | 0.3996 |
+| Round-73 leader `5Eh8oDoA` v3 (local replay = its official round-74 score) | 0.341 | 0.344 | 0.527 | 0.369 | 0.3954 |
+| `5C55Guoe` v1 | 0.313 | 0.339 | 0.429 | 0.379 | 0.3648 |
+
+- v2 is 3.3% above the round's official top (1% is required to take the lead) and matches the +0.008–0.014 gain of
+  self-training over v1 seen on rounds 69–73.
+- Subsets 1 and 2 had 26–27% noise and score low for everyone.
+- Round 75 opened at 15:30 UTC with a top score of 0.4410 (score to beat 0.4454); PRESS has not been submitted.
