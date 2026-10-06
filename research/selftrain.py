@@ -18,23 +18,23 @@ def final(Z, gt, arx, S=None):
     l = fcluster(linkage(Z, "average", "cosine"), S, "maxclust"); a_ = np.argsort(-d)[: int(len(l) * fr)]; core = np.ones(len(l), bool); core[a_] = False
     l2 = l.copy(); l2[a_] = 10**6 + np.arange(len(a_)); return sc(gt, l2), l, core, Z
 def one(f):
-    s = load_subset(f, 8192, 4096); gt = s["y"]; arx = s["arxiv"]; Z = fixz(s["X"] @ np.load(WP)); out = {}
+    s = load_subset(f, int(sys.argv[2]), int(sys.argv[3]), True); gt = s["y"]; arx = s["arxiv"]; Z = fixz(s["X"] @ np.load(WP)); out = {}
     base, l, core, Zs = final(Z, gt, arx); out["base"] = base
     T = [prep(t) for t in pd.read_parquet(f, columns=["text"]).text]
     A = TfidfVectorizer(max_features=60000, min_df=2, max_df=.5, sublinear_tf=True, ngram_range=(1, 2), dtype=np.float32).fit_transform(T)
     B = TfidfVectorizer(max_features=60000, min_df=2, max_df=.5, sublinear_tf=True, analyzer="char_wb", ngram_range=(3, 5), dtype=np.float32).fit_transform(T)
     X = normalize(hstack([A, B]).tocsr())
     t0 = time.time()
-    for Sp in (30, 60):
+    for Sp in (60, 120):
         lp = fcluster(linkage(Zs, "average", "cosine"), Sp, "maxclust"); ids, inv, cnt = np.unique(lp, return_inverse=True, return_counts=True)
         tr = core & (cnt[inv] >= 10)
-        for alpha in (1.0, 10.0):
+        for alpha in (10.0, 30.0):
             clf = RidgeClassifier(alpha=alpha).fit(X[tr], lp[tr]); P = clf.decision_function(X); P = fixz(P - P.mean(1, keepdims=True))
             out[f"P S{Sp} a{alpha}"] = final(P, gt, arx)[0]
             for w in (.5, 1.0): out[f"Z+{w}P S{Sp} a{alpha}"] = final(normalize(np.hstack([Z, w * P])), gt, arx)[0]
     out["sec"] = time.time() - t0
     return arx, out
 if __name__ == "__main__":
-    with ProcessPoolExecutor(4) as ex: R = list(ex.map(one, files_for([69, 70, 71, 72, 73])))
+    with ProcessPoolExecutor(3) as ex: R = list(ex.map(one, files_for([69, 70, 71, 72, 73])))
     for k in R[0][1]:
         so = np.mean([o[k] for a, o in R if not a]); ar = np.mean([o[k] for a, o in R if a]); print("%-22s social %.4f arxiv %.4f round %.4f" % (k, so, ar, (3 * so + ar) / 4))

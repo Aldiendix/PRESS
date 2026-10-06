@@ -67,3 +67,34 @@ table was trained only on earlier rounds.
 | PRESS, same shape, trained on rounds 40–68 | 0.478 | 0.481 | 0.507 | 0.395 | 0.510 | 0.474 |
 
 Official top score of round 73 at the time: 0.4949 (code not yet revealed).
+
+## 2026-10-06 — towards v2
+
+### Self-training at test time (adopted)
+After the first clustering pass, a ridge classifier is fitted on the batch's exact TF-IDF vocabulary (word 1–2-grams
++ char 3–5-grams, no hashing) to predict the first-pass clusters of the dense points; its centred, normalised
+decision scores are appended to the student embedding and the pipeline is run again.
+
+| Table (trained on rounds 40–68), unseen rounds 69–73 | 69 | 70 | 71 | 72 | 73 | mean |
+|---|---|---|---|---|---|---|
+| without self-training | 0.478 | 0.481 | 0.507 | 0.395 | 0.510 | 0.474 |
+| self-training (60 clusters, α = 10, weight 0.5) | 0.487 | 0.490 | 0.516 | 0.399 | 0.513 | 0.481 |
+| self-training (90 clusters, α = 10, weight 0.75) | 0.490 | 0.494 | 0.518 | 0.398 | 0.514 | 0.4825 |
+
+- Seed-to-seed standard deviation of the mean is ~0.002, so the gain (+0.008) is real.
+- Two or three self-training iterations, 40–90 first-pass clusters, α 5–10, weight 0.5–1.0: all within ±0.002.
+- Cost: ~6 s per subset on one core.
+
+### Things that did not help
+| Change | Result (mean, unseen rounds 69–73) |
+|---|---|
+| Train through the k-NN smoothing step (smoothing inside the loss) | 0.4734 vs 0.474 |
+| 128 dimensions instead of 96 at the same size | 0.4730 |
+| Table trained on arXiv subsets only | arXiv 0.360 vs 0.354; not worth splitting the budget |
+| Synthetic arXiv subsets (public 2025–26 titles labelled with all-mpnet-base-v2 + UMAP + HDBSCAN, min_samples 5–8) added to training | 0.4666 with teacher-similarity loss, 0.4647 without; arXiv fell to 0.346 |
+| x/y/z loss weight 0.25 / 1.0, learning rate 0.04, 40,960 × 64 table (all with self-training) | 0.482 / 0.484 / 0.483 / 0.4845 — within noise of 0.4825 |
+
+- Calibration by-product: on six real arXiv subsets, UMAP(15 nn, 5 dims, min_dist 0, cosine) + HDBSCAN(min size 25,
+  **min_samples 8**, EOM) agrees best with the ground truth (score 0.644, 36 clusters vs 38, noise 30% vs 27%).
+- The synthetic-data result suggests the student gains from the recurring structure of the competition's own
+  rounds; outside data dilutes it even when it is from the same source.

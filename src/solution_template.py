@@ -15,6 +15,7 @@ from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.sparse import diags, hstack
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.feature_extraction.text import HashingVectorizer, TfidfVectorizer
+from sklearn.linear_model import RidgeClassifier
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import normalize
 
@@ -22,6 +23,8 @@ FW, FC, D, IDF, ROWS, RICE, MARK = __FW__, __FC__, __D__, __IDF__, __ROWS__, __R
 # (smoothing k, alpha, iterations, clusters, singleton share) for social posts / paper titles
 P_SOCIAL, P_TITLE = __P_SOCIAL__, __P_TITLE__
 MAXN = 7000
+# self-training: (first-pass clusters, ridge alpha, weight of classifier scores); None = off
+REFINE = __REFINE__
 TABLE = "__TABLE__"
 _W = None
 _URL = re.compile(r"https?://\S+|www\.\S+")
@@ -106,13 +109,28 @@ def smooth(Z, k, alpha, iters):
     return Z
 
 
-def core(Z, p):
+def core(Z, p, docs=None):
     k, alpha, iters, S, fr = p
     n = len(Z)
-    Z = smooth(Z, k, alpha, iters)
-    d = NearestNeighbors(n_neighbors=min(16, n), metric="cosine").fit(Z).kneighbors(Z)[0][:, -1]
-    lab = fcluster(linkage(Z, "average", "cosine"), max(2, min(S, n // 8)), "maxclust").astype(np.int64)
+    Zs = smooth(Z, k, alpha, iters)
+    d = NearestNeighbors(n_neighbors=min(16, n), metric="cosine").fit(Zs).kneighbors(Zs)[0][:, -1]
+    link = linkage(Zs, "average", "cosine")
     out = np.argsort(-d)[: int(n * fr)]
+    if docs is not None and REFINE and n >= 500:
+        try:  # self-training: a linear classifier on the batch's exact vocabulary learns the first-pass clusters
+            pseudo = fcluster(link, REFINE[0], "maxclust")
+            ok = np.ones(n, bool)
+            ok[out] = False
+            ok &= np.bincount(pseudo)[pseudo] >= 10
+            kw = dict(max_features=60000, min_df=2, max_df=0.5, sublinear_tf=True, dtype=np.float32)
+            X = normalize(hstack([TfidfVectorizer(ngram_range=(1, 2), **kw).fit_transform(docs),
+                                  TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5), **kw).fit_transform(docs)]).tocsr())
+            P = RidgeClassifier(alpha=REFINE[1]).fit(X[ok], pseudo[ok]).decision_function(X)
+            P = normalize(P - P.mean(1, keepdims=True))
+            return core(normalize(np.hstack([Z, REFINE[2] * P])), p)
+        except Exception:
+            docs = None
+    lab = fcluster(link, max(2, min(S, n // 8)), "maxclust").astype(np.int64)
     lab[out] = 10**6 + np.arange(len(out))
     return lab
 
@@ -139,7 +157,7 @@ def cluster_texts(texts):
         Z = embed(sub)
         m = len(sub)
         if m <= MAXN:
-            lab = core(Z, p)
+            lab = core(Z, p, sub)
         else:  # cluster a sample, give the rest the majority label of their 5 nearest sampled points
             pick = np.sort(np.random.default_rng(0).choice(m, MAXN, replace=False))
             base = core(Z[pick], p)

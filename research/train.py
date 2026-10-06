@@ -34,17 +34,18 @@ if __name__ == "__main__":
     ap.add_argument("--wt", type=float, default=1.0, help="teacher similarity loss weight"); ap.add_argument("--wx", type=float, default=0.0, help="xyz-neighbour loss weight")
     ap.add_argument("--tern", type=float, default=0.0, help="ternary QAT threshold (x mean|W| per dim); 0 = float")
     ap.add_argument("--noise_neg", type=int, default=1, help="use GT-noise points as negatives in the label loss"); ap.add_argument("--nz", type=float, default=0.0, help="target non-zero fraction (overrides --tern threshold)"); ap.add_argument("--idf", type=int, default=0); ap.add_argument("--rows", type=int, default=0, help="per-row scale levels (0=off)")
-    ap.add_argument("--l1", type=float, default=0.0); ap.add_argument("--only", default="all"); ap.add_argument("--seed", type=int, default=0); ap.add_argument("--sm", type=int, default=0, help="in-loop k-NN smoothing iterations"); ap.add_argument("--smk", type=int, default=6); ap.add_argument("--sma", type=float, default=0.4)
+    ap.add_argument("--l1", type=float, default=0.0); ap.add_argument("--only", default="all"); ap.add_argument("--extra", type=int, nargs=2, default=None, help="extra (synthetic) round range"); ap.add_argument("--nz_start", type=float, default=0.0, help="anneal non-zero share from this value"); ap.add_argument("--anneal", type=float, default=0.6, help="fraction of steps over which to anneal")
+    ap.add_argument("--seed", type=int, default=0); ap.add_argument("--sm", type=int, default=0, help="in-loop k-NN smoothing iterations"); ap.add_argument("--smk", type=int, default=6); ap.add_argument("--sma", type=float, default=0.4)
     ap.add_argument("--smw", type=float, default=0.5, help="weight of the un-smoothed loss when --sm is on"); ap.add_argument("--out", required=True); ap.add_argument("--threads", type=int, default=6)
     a = ap.parse_args(); torch.set_num_threads(a.threads); torch.manual_seed(a.seed); rng = np.random.default_rng(a.seed)
-    fs = files_for(range(a.train[0], a.train[1] + 1)); S = [load_subset(f, a.fw, a.fc, a.idf) for f in fs]
+    fs = files_for(range(a.train[0], a.train[1] + 1)) + (files_for(range(a.extra[0], a.extra[1] + 1)) if a.extra else []); S = [load_subset(f, a.fw, a.fc, a.idf) for f in fs]
     if a.only != "all": S = [s for s in S if s["arxiv"] == (a.only == "arxiv")]
     print(len(S), "subsets; with teacher:", sum(s["T"] is not None for s in S), flush=True)
     F = a.fw + a.fc; W = torch.nn.Parameter(torch.randn(F, a.d) * 0.05); scale = torch.nn.Parameter(torch.ones(a.d)); g = torch.nn.Parameter(torch.zeros(F)); opt = torch.optim.Adam([W, scale, g], lr=a.lr)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=a.lr, total_steps=a.steps, pct_start=0.05)
     def quant(W):
         if a.nz:
-            thr = torch.kthvalue(W.detach().abs(), int(W.shape[0] * (1 - a.nz)), dim=0, keepdim=True).values
+            thr = torch.kthvalue(W.detach().abs(), max(1, int(W.shape[0] * (1 - cur_nz[0]))), dim=0, keepdim=True).values
         else:
             thr = a.tern * W.abs().mean(0, keepdim=True)
         q = torch.sign(W) * (W.abs() > thr)
@@ -53,8 +54,11 @@ if __name__ == "__main__":
         return Wq, q
     def rowq():   # per-row scale on a half-octave grid, straight-through
         k = torch.clamp(torch.round(2 * g), -(a.rows // 2), a.rows - a.rows // 2 - 1); return torch.exp2((g + (k / 2 - g).detach()))
+    cur_nz = [a.nz]
     t0 = time.time(); ema = None
     for step in range(a.steps):
+        if a.nz_start:
+            fr_ = min(1.0, step / (a.anneal * a.steps)); cur_nz[0] = a.nz + (a.nz_start - a.nz) * (1 - fr_) ** 3
         s = S[rng.integers(len(S))]; idx = rng.choice(s["X"].shape[0], a.bs, replace=False)
         Wf = quant(W)[0] if (a.tern or a.nz) else W
         z = Fn.normalize(torch.sparse.mm(to_torch(s["X"][idx]), Wf), dim=1)

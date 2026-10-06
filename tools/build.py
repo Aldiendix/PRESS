@@ -34,7 +34,7 @@ def strip(src):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--table", required=True); ap.add_argument("--fw", type=int, required=True); ap.add_argument("--fc", type=int, required=True)
-    ap.add_argument("--d", type=int, required=True); ap.add_argument("--idf", type=int, default=0); ap.add_argument("--mark", type=int, default=0)
+    ap.add_argument("--d", type=int, required=True); ap.add_argument("--idf", type=int, default=0); ap.add_argument("--mark", type=int, default=0); ap.add_argument("--refine", default="None")
     ap.add_argument("--social", default="(20, 0.4, 4, 80, 0.2)"); ap.add_argument("--title", default="(35, 0.4, 4, 80, 0.3)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
@@ -60,7 +60,7 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     src = strip(open(os.path.join(here, "..", "src", "solution_template.py"), encoding="utf8").read())
     for k, v in (("__FW__", a.fw), ("__FC__", a.fc), ("__D__", a.d), ("__IDF__", a.idf), ("__ROWS__", int(rows)), ("__P_SOCIAL__", a.social),
-                 ("__P_TITLE__", a.title), ("__RICE__", rice), ("__MARK__", a.mark), ("__TABLE__", to_chars(comp))):
+                 ("__P_TITLE__", a.title), ("__RICE__", rice), ("__MARK__", a.mark), ("__REFINE__", a.refine), ("__TABLE__", to_chars(comp))):
         src = src.replace(k, str(v))
     open(a.out, "w", encoding="utf8").write(src)
     n = len(src)

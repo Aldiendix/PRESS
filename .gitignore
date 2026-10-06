@@ -9,3 +9,5 @@ __pycache__/
 *.pid
 .apex.config.json
 .env
+dist/
+research/done_*
