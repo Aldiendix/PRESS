@@ -121,3 +121,32 @@ decision scores are appended to the student embedding and the pipeline is run ag
 - 5,000 texts: ~5 s on one core, 531 MB peak. 50,000 texts: ~12 s, 972 MB (limit 1.5 GB; batches above 6,000
   texts are clustered on a 6,000-text sample and the rest take the majority label of their 5 nearest sampled points).
 - Empty or symbol-only texts get `-1`; batches of 1–2 texts return distinct ids; an empty request returns HTTP 400.
+
+## 2026-10-06 06:50 UTC — round-73 leader code revealed (`5Eh8oDoA` v3, official 0.4949)
+
+Local replay (`reference/r73_5Eh8oDoA_v3_0.4949.py`, 49,396 characters, ~20 s per subset):
+
+| Solution | 69 | 70 | 71 | 72 | 73 | mean |
+|---|---|---|---|---|---|---|
+| Leader v3 (rounds before 73 are probably in its tables' training data) | 0.487 | 0.489 | 0.514 | 0.391 | 0.495 | 0.475 |
+| PRESS v2 configuration, table trained on rounds 40–68 (all five rounds unseen) | 0.490 | 0.494 | 0.518 | 0.398 | 0.514 | 0.4825 |
+
+Round 73 is the only round both have not seen: 0.514 vs 0.495 (+3.8%). Round 74 data is not public until the round ends.
+
+**What changed versus `5C55Guoe` v1 (0.4749)** — same architecture and packed tables (the social table differs slightly):
+- More hand-tuned regimes keyed on median text length and its 10th percentile (view weights, number of
+  principal components removed, spectral dimensions 22–56, fixed cluster counts 28/32, noise share 0.10–0.25).
+- `LM`: merge clusters whose words are < 12% English stop-words (non-English or spam-like) when their centroids
+  have cosine ≥ 0.9.
+- `MNN`: merge pairs of tiny clusters that are mutual nearest neighbours (cosine ≥ 0.8 / 0.86).
+- Clusters holding more than 15% of the points are re-split with a finer cut of the same linkage tree.
+- Title pipeline: smoothing strength 0.4 → 0.6, k 35 → 20.
+
+**Tested on the PRESS pipeline (unseen rounds 69–73, baseline 0.4825)**
+| Idea | Result |
+|---|---|
+| Re-split clusters above 15% / 10% of points (240 or 400 fine clusters) | 0.4825 / 0.4800 / 0.4820 |
+| Re-attach singletons with cosine ≥ 0.95 / 0.9 / 0.8 to a cluster centroid | 0.4840 / 0.4839 / 0.4749 |
+
+Nothing adopted: the gains are inside the seed noise (~0.002). The leader's improvements are regime tuning on
+top of a weaker embedding; none of it addresses embedding quality, which is where PRESS is ahead.
