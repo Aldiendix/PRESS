@@ -12,17 +12,20 @@ import numpy as np, uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from scipy.cluster.hierarchy import fcluster, linkage
-from scipy.sparse import diags, hstack
+from scipy.sparse import hstack, vstack
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.feature_extraction.text import HashingVectorizer, TfidfVectorizer
 from sklearn.linear_model import RidgeClassifier
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import normalize
+import sklearn
+
+sklearn.set_config(working_memory=96)
 
 FW, FC, D, IDF, ROWS, RICE, MARK = __FW__, __FC__, __D__, __IDF__, __ROWS__, __RICE__, __MARK__
 # (smoothing k, alpha, iterations, clusters, singleton share) for social posts / paper titles
 P_SOCIAL, P_TITLE = __P_SOCIAL__, __P_TITLE__
-MAXN = 7000
+MAXN = 6000
 # self-training: (first-pass clusters, ridge alpha, weight of classifier scores); None = off
 REFINE = __REFINE__
 TABLE = "__TABLE__"
@@ -90,12 +93,13 @@ def table():
 def embed(docs):
     hw = HashingVectorizer(n_features=FW, ngram_range=(1, 2), analyzer="word", token_pattern=r"(?u)\b\w\w+\b|[^\w\s]" if MARK else r"(?u)\b\w\w+\b", alternate_sign=False, norm=None, dtype=np.float32)
     hc = HashingVectorizer(n_features=FC, ngram_range=(3, 5), analyzer="char_wb", alternate_sign=False, norm=None, dtype=np.float32)
-    X = hstack([hw.transform(docs), hc.transform(docs)]).tocsr()
+    X = vstack([hstack([hw.transform(docs[i:i + 4000]), hc.transform(docs[i:i + 4000])]).tocsr() for i in range(0, len(docs), 4000)]).tocsr()
     X.data = np.log1p(X.data)
-    if IDF:
-        df = np.asarray((X > 0).sum(0)).ravel()
-        X = X @ diags(np.log((X.shape[0] + 1.0) / (df + 1.0)) + 1.0)
-    Z = np.asarray(normalize(X) @ table(), np.float32)
+    if IDF:  # batch IDF, applied in place
+        df = np.bincount(X.indices, minlength=X.shape[1])
+        X.data *= (np.log((X.shape[0] + 1.0) / (df + 1.0)) + 1.0).astype(np.float32)[X.indices]
+    X = normalize(X, copy=False)
+    Z = np.vstack([np.asarray(X[i:i + 4000] @ table(), np.float32) for i in range(0, len(docs), 4000)])
     z = np.abs(Z).sum(1) < 1e-9
     if z.any():
         Z[z] = np.random.RandomState(0).normal(size=(int(z.sum()), D)) * 1e-3

@@ -1,6 +1,6 @@
 # v2 (2026-10-06)
 
-`solution.py` is 48,515 characters.
+`solution.py` is 48,762 characters. Peak memory 531 MB for 5,000 texts (972 MB for 50,000); ~5 s per subset on one core.
 
 **Changes from v1**
 - **Self-training pass.** After the first clustering, a ridge classifier on the batch's exact TF-IDF vocabulary

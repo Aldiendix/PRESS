@@ -98,3 +98,26 @@ decision scores are appended to the student embedding and the pipeline is run ag
   **min_samples 8**, EOM) agrees best with the ground truth (score 0.644, 36 clusters vs 38, noise 30% vs 27%).
 - The synthetic-data result suggests the student gains from the recurring structure of the competition's own
   rounds; outside data dilutes it even when it is from the same source.
+
+### Where the approach saturates (all with self-training, unseen rounds 69–73)
+| Experiment | Result |
+|---|---|
+| Table size 47 KB / 77 KB / 128 KB / 207 KB / unquantized float | 0.476 / 0.484 / 0.487 / 0.491 / 0.493 |
+| Sparsity annealed from dense to 3.3% during training | 0.4834–0.4845 vs 0.4825 (noise level) |
+| Residual MLP (512 hidden) on top of the float table | worse than linear (neighbour purity 0.62 vs 0.69): overfits |
+| Teacher-embedding similarity loss on the 34 real arXiv subsets, weight 1 / 3 | 0.4846 / 0.4769 (arXiv 0.359 / 0.349 vs 0.357) |
+| Smoothing variants: similarity-weighted, mutual-k-NN, re-computed graph, shared-neighbour ranking | 0.4825 / 0.4724 / 0.4559 / 0.4596 vs 0.4838 for the plain mean |
+| Oracle per-subset cluster count and singleton share | +0.006 social, +0.002 arXiv at most |
+| Shared `-1` cluster for the most noise-like 2–20% of points (7 scores tried) | always worse; precision of every score is ~0.3 |
+| Supervised noise detector from text (rounds 40–68 → 69–73) | AUC 0.66; precision at top 2%: 0.34 social, 0.55 arXiv |
+
+- The shipped table scores 0.498 even on rounds inside its training data, against 0.4825 on unseen rounds: the
+  bag-of-n-grams model class, not the bit budget or the amount of data, is what limits the score.
+- The platform's client measures the limit with Python `len()` (code points). Characters outside the BMP would
+  carry 20 bits instead of 15 (+33% table), but the table-size curve says that is worth only ~+0.002, and it is
+  untested on the server side. Not used.
+
+### Robustness of the shipped file
+- 5,000 texts: ~5 s on one core, 531 MB peak. 50,000 texts: ~12 s, 972 MB (limit 1.5 GB; batches above 6,000
+  texts are clustered on a 6,000-text sample and the rest take the majority label of their 5 nearest sampled points).
+- Empty or symbol-only texts get `-1`; batches of 1–2 texts return distinct ids; an empty request returns HTTP 400.
