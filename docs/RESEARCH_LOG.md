@@ -218,3 +218,53 @@ Round 75 leaderboard at 17:00 UTC: top 0.4518, with a cluster of new entries at 
 
 - The unquantized table reaches neighbour purity 0.82 on its training rounds and 0.70 on unseen rounds; the
   ternary table 0.69 and 0.66. The sparse table is already the regularised version of the model.
+
+## 2026-10-06 night — literature-driven sweep (test bench `research/lab.py`)
+
+Bench = v4 settings on cached embeddings; set A = rounds 69–73 with a table trained on 40–68, set B = round 74
+with a table trained on 40–73. Baseline: A 0.4877, B 0.4174.
+
+### Why nothing on the embedding side moves the score any more
+| Embedding → procedure | social (round 73) | arXiv (rounds 69–73) |
+|---|---|---|
+| Real teacher (all-mpnet-base-v2) → PRESS pipeline | 0.60–0.62 | 0.352 |
+| PRESS ternary student → PRESS pipeline | 0.58 | 0.353 |
+| Real teacher → UMAP + HDBSCAN | 0.79 | 0.62 |
+| 70% teacher / 30% student mix → UMAP + HDBSCAN | 0.70 | — |
+| PRESS student → UMAP + HDBSCAN | 0.58 | 0.29–0.34 |
+
+- The smoothing + average-linkage + singleton pipeline is capped near 0.60 even with perfect embeddings, and the
+  student is already at ~95% of that cap. Only UMAP + HDBSCAN (which forms the shared noise cluster) goes
+  higher, and it needs an embedding much closer to the teacher than any ~77 KB model reaches.
+- A one-layer self-attention encoder over hashed words fits training rounds better than the bag model
+  (purity 0.846 vs 0.835) but is identical on unseen rounds (0.707 vs 0.707 social; 0.600 vs 0.591 arXiv):
+  the limit is what the labelled rounds can teach, not the architecture.
+
+### Methods from the literature, all tested on the bench
+| Method (source) | A | B |
+|---|---|---|
+| Density peaks, 40/80/120 centres; halo points as singletons (Rodriguez & Laio, Science 2014) | 0.474–0.479; halo 0.437–0.451 | 0.390–0.401; 0.338–0.370 |
+| Jaccard shared-neighbour graph + Leiden (PhenoGraph, Cell 2015; Traag et al., Sci Rep 2019) | 0.432–0.467 | 0.362–0.394 |
+| Hubness reduction: CSLS distance / local scaling / CSLS neighbours (Schnitzer et al., JMLR 2012) | 0.471 / 0.412 / 0.475 | 0.395 / 0.336 / 0.400 |
+| Evidence-accumulation consensus over 16 perturbed clusterings (Fred & Jain 2005; SC3, Nat Methods 2017) | 0.481–0.486 | 0.415–0.417 |
+| Singletons chosen by ensemble instability | 0.476–0.481 | 0.417–0.419 |
+| Shared noise cluster from: ensemble instability, out-of-fold classifier margin (confident learning), small clusters, vote of 4 UMAP + HDBSCAN runs | all below baseline; noise precision 0.19–0.43 | same |
+| Ensemble of 2 or 3 independently trained full-size tables | 0.4849 (vs 0.4838 single, v3 settings) | — |
+| Noise-isolation loss during training (push ground-truth noise away from everything) | 0.4841 / 0.4797; noise precision 0.33 → 0.34–0.36 | — |
+
+### arXiv knowledge from the public title pool (557k titles from 2025–26; 91% of past competition titles are in it)
+| Float table, unseen rounds 69–73 | arXiv purity | teacher-neighbour recall | arXiv score |
+|---|---|---|---|
+| Baseline | 0.604 | 0.22 | 0.367 |
+| + 44 synthetic subsets with teacher-similarity loss | 0.654 | 0.33 | 0.358 |
+| + 40% teacher-only batches from the pool | 0.653 | 0.39 | 0.374 |
+| arXiv-only specialist, 24,576 × 96 | — | 0.43 | 0.358 (UMAP + HDBSCAN 0.343–0.362) |
+| arXiv-only specialist, 65,536 × 192 | — | 0.48 | 0.362 (UMAP + HDBSCAN 0.369–0.375) |
+
+- Distillation from the pool does improve arXiv neighbourhoods, but the pipeline cap hides it, and the gain does
+  not survive in the shipped sparse table (pool batches at 15% / 30%: 0.4819 / 0.4760 vs 0.4839).
+
+### Conclusion
+v4 stands. No method from this sweep improves it. A real step up needs either an embedding near teacher quality
+(not reachable in ~77 KB with any model tried) or a way to predict reference noise (not predictable from our
+space by any of ~20 signals).

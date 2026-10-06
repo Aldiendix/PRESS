@@ -39,7 +39,7 @@ if __name__ == "__main__":
     ap.add_argument("--tern", type=float, default=0.0, help="ternary QAT threshold (x mean|W| per dim); 0 = float")
     ap.add_argument("--noise_neg", type=int, default=1, help="use GT-noise points as negatives in the label loss"); ap.add_argument("--nz", type=float, default=0.0, help="target non-zero fraction (overrides --tern threshold)"); ap.add_argument("--idf", type=int, default=0); ap.add_argument("--rows", type=int, default=0, help="per-row scale levels (0=off)")
     ap.add_argument("--l1", type=float, default=0.0); ap.add_argument("--only", default="all"); ap.add_argument("--extra", type=int, nargs=2, default=None, help="extra (synthetic) round range"); ap.add_argument("--nz_start", type=float, default=0.0, help="anneal non-zero share from this value"); ap.add_argument("--anneal", type=float, default=0.6, help="fraction of steps over which to anneal")
-    ap.add_argument("--proto", type=float, default=0.0, help="weight of a prototype (cluster-centroid) loss"); ap.add_argument("--drop", type=float, default=0.0, help="n-gram dropout probability"); ap.add_argument("--wd", type=float, default=0.0); ap.add_argument("--half", type=float, default=0.0, help="recency half-life in rounds for subset sampling (0 = uniform)"); ap.add_argument("--seed", type=int, default=0); ap.add_argument("--sm", type=int, default=0, help="in-loop k-NN smoothing iterations"); ap.add_argument("--smk", type=int, default=6); ap.add_argument("--sma", type=float, default=0.4)
+    ap.add_argument("--proto", type=float, default=0.0, help="weight of a prototype (cluster-centroid) loss"); ap.add_argument("--drop", type=float, default=0.0, help="n-gram dropout probability"); ap.add_argument("--wd", type=float, default=0.0); ap.add_argument("--half", type=float, default=0.0, help="recency half-life in rounds for subset sampling (0 = uniform)"); ap.add_argument("--nu", type=float, default=0.0, help="isolation loss for ground-truth noise points"); ap.add_argument("--pool", type=float, default=0.0, help="probability of a teacher-only batch drawn from the arXiv title pool"); ap.add_argument("--pooln", type=int, default=240000); ap.add_argument("--seed", type=int, default=0); ap.add_argument("--sm", type=int, default=0, help="in-loop k-NN smoothing iterations"); ap.add_argument("--smk", type=int, default=6); ap.add_argument("--sma", type=float, default=0.4)
     ap.add_argument("--smw", type=float, default=0.5, help="weight of the un-smoothed loss when --sm is on"); ap.add_argument("--out", required=True); ap.add_argument("--threads", type=int, default=6)
     a = ap.parse_args(); torch.set_num_threads(a.threads); torch.manual_seed(a.seed); rng = np.random.default_rng(a.seed)
     fs = files_for(range(a.train[0], a.train[1] + 1)) + (files_for(range(a.extra[0], a.extra[1] + 1)) if a.extra else []); S = [load_subset(f, a.fw, a.fc, a.idf) for f in fs]
@@ -59,6 +59,9 @@ if __name__ == "__main__":
     def rowq():   # per-row scale on a half-octave grid, straight-through
         k = torch.clamp(torch.round(2 * g), -(a.rows // 2), a.rows - a.rows // 2 - 1); return torch.exp2((g + (k / 2 - g).detach()))
     cur_nz = [a.nz]
+    if a.pool:   # pool of arXiv titles with teacher embeddings; batch IDF is applied per sampled batch
+        PX = sp.hstack([fold(sp.load_npz("cache/pool.w.npz")[:a.pooln], a.fw), fold(sp.load_npz("cache/pool.c.npz")[:a.pooln], a.fc)]).tocsr(); PX.sum_duplicates(); PX.data = np.log1p(PX.data)
+        PT = np.load("cache/arxiv_pool.f16.npy", mmap_mode="r"); print("pool", PX.shape, flush=True)
     rnds = np.array([int(s_["name"].split("_")[1]) for s_ in S]); rnds = np.where(rnds > 9000, a.train[1], rnds)
     pw = np.exp2(-(a.train[1] - rnds) / a.half) if a.half else np.ones(len(S)); pw = pw / pw.sum()
     t0 = time.time(); ema = None
@@ -68,6 +71,12 @@ if __name__ == "__main__":
         s = S[rng.choice(len(S), p=pw)]; idx = rng.choice(s["X"].shape[0], a.bs, replace=False)
         Wf = quant(W)[0] if (a.tern or a.nz) else W
         Xb = s["X"][idx]
+        if a.pool and rng.random() < a.pool:
+            pidx = np.sort(rng.choice(PX.shape[0], a.bs, replace=False)); Xb = PX[pidx]
+            if a.idf:
+                df_ = np.asarray((Xb > 0).sum(0)).ravel(); Xb = Xb @ sp.diags(np.log((a.bs + 1.0) / (df_ + 1.0)) + 1.0)
+            Xb = normalize(Xb).astype(np.float32)
+            s = dict(y=np.full(a.bs, -1, np.int64), xyz=None, T=np.asarray(PT[pidx], np.float32)); idx = np.arange(a.bs)
         if a.drop:
             Xb = Xb.copy(); Xb.data = Xb.data * (rng.random(len(Xb.data)) >= a.drop); Xb.eliminate_zeros(); Xb = normalize(Xb)
         z = Fn.normalize(torch.sparse.mm(to_torch(Xb), Wf), dim=1)
@@ -79,13 +88,15 @@ if __name__ == "__main__":
             if not a.noise_neg:
                 lg2 = logits.masked_fill((y < 0)[None, :], -1e9); logp = lg2 - torch.logsumexp(lg2, 1, keepdim=True)
             pos = (y[:, None] == y[None, :]) & (y[:, None] >= 0) & ~eye; has = pos.any(1)
-            loss = -((logp * pos).sum(1)[has] / pos.sum(1)[has]).mean()
+            loss = -((logp * pos).sum(1)[has] / pos.sum(1)[has]).mean() if has.any() else sim.sum() * 0
             if a.wt and s["T"] is not None:   # match teacher neighbour distribution
                 t = Fn.normalize(torch.from_numpy(s["T"][idx]), dim=1); tl = (t @ t.T / 0.05).masked_fill(eye, -1e9)
                 loss = loss + a.wt * -(torch.softmax(tl, 1) * logp_all).sum(1).mean()
-            if a.wx:
+            if a.wx and s["xyz"] is not None:
                 x = torch.from_numpy(s["xyz"][idx]); d2 = torch.cdist(x, x) ** 2; xl = (-d2 / 0.25).masked_fill(eye, -1e9)
                 loss = loss + a.wx * -(torch.softmax(xl, 1) * logp_all).sum(1).mean()
+            if a.nu and (y < 0).any():   # noise anchors: be far from every other point
+                loss = loss + a.nu * torch.logsumexp(logits[y < 0], 1).mean() * a.tau
             if a.proto:   # pull each point to its (leave-one-out) cluster centroid, away from other centroids
                 m = y >= 0; ids, inv = torch.unique(y[m], return_inverse=True); oh = Fn.one_hot(inv, len(ids)).float(); zm = z[m]
                 cnt = oh.sum(0); sums = oh.T @ zm; cen = Fn.normalize(sums, dim=1); lg = zm @ cen.T / a.tau
