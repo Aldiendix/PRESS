@@ -383,3 +383,31 @@ on set A (v3 settings), so single-run differences below ~0.004 are not evidence.
 
 arXiv: 0.3504 / 0.3665 vs 0.3685. The pair model cannot tell which pieces belong together any better than the
 average-linkage tree already does; rejected.
+
+## 2026-10-07 — multi-agent campaign (35 agents: 8 scouts, 3 judges, experimenters, adversarial verifiers, integrators)
+
+Bench: `research/bench.py`; brief: `docs/AGENT_BRIEF.md`; agent work in `research/wf/` (not committed).
+Deltas are vs v4.1. D = rounds 61–74 (table 40–60), A = 69–73 (table 40–68), B = 74 (40–73), C = 73 (40–72).
+
+| Idea | D (odd / even) | A / B / C | Verdict |
+|---|---|---|---|
+| **Learned singleton ranker** (17 features; logistic fit to the first-order score gain of abstaining each point) | +0.0028 (+0.0027 / +0.0028) | +0.0020 / +0.0029 / +0.0020 | survived; end to end +0.0024 / +0.0021 / +0.0025 |
+| **Ranker with 2 lexical features** (10-NN agreement and centroid margin in exact TF-IDF space; 19 features) | +0.0048 (+0.0047 / +0.0049) | +0.0032 / +0.0037 / +0.0027 | survived; end to end +0.0034 / +0.0031 / +0.0033 |
+| **Language split** of mixed-language clusters | +0.0037 (+0.0033 / +0.0041) | +0.0005 / 0 / 0 | survived; insurance (pays when new language communities appear, e.g. round 66 +0.024) |
+| Link-post rule (`preview.redd.it` captions grouped when ≥ 20) | +0.0011 | +0.0011 / 0 / +0.0004 | small but consistent; kept in the stack |
+| Image-link seeded pseudo-class | +0.0024 | +0.0015 / 0 / +0.0008 | refuted (loses on earlier periods where it fires) |
+| **Full stack** (ranker + language split + link rule) | +0.0076 (+0.0072 / +0.0081), 51 of 56 better | +0.0036 / +0.0029 / +0.0028 | survived; end to end +0.0038 / +0.0028 / +0.0025 |
+| Compact container (ANS-coded table + minified code) | lossless; 46.7k chars vs 49.1k | — | adopted (frees 3,300 chars) |
+| Denser table using the freed space (nz 0.036, 0.046, 0.050; 19-bit characters) | +0.0007 to +0.0026, one or two seeds | through-68 check +0.0016 / +0.0017 | below the bar; 19-bit characters also untested on the server |
+| Pair-count-weighted contrastive loss | −0.0014 | — | no gain |
+| Self-training set chosen by density and lexical agreement | +0.0018 on one table, +0.0004 / +0.0005 on two others | +0.0011 / +0.0008 / +0.0005 | inconclusive |
+| Lexical-fused smoothing graph | +0.005 | ≈ 0 | stale-table effect only; rejected |
+| Removing re-served round files from training | −0.0021 | — | no gain (bench now aware of the re-serve) |
+| Re-tuning cluster count / singleton share on fresh tables (55 subsets) | +0.0001 | — | no gain |
+
+**Shipped:** v4.2 = stack with the 17-feature ranker; v4.3 = stack with the 19-feature ranker (47,009 chars).
+
+**Not adopted, needs the user's decision:** a scout found that the organisers have re-served byte-identical
+datasets (round 54 = round 43, round 55 = round 44, round 65 subset 3 = round 43 subset 3). A file could recognise a
+re-served batch and return its stored public labels. That exploits a flaw in the evaluation rather than improving
+the method, and contradicts the competition's stated intent ("memorising revealed rounds does not help").
