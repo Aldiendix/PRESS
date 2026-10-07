@@ -411,3 +411,18 @@ Deltas are vs v4.1. D = rounds 61–74 (table 40–60), A = 69–73 (table 40–
 datasets (round 54 = round 43, round 55 = round 44, round 65 subset 3 = round 43 subset 3). A file could recognise a
 re-served batch and return its stored public labels. That exploits a flaw in the evaluation rather than improving
 the method, and contradicts the competition's stated intent ("memorising revealed rounds does not help").
+
+## 2026-10-07 15:40 UTC — round 75 (unseen by the production table) and v5
+
+| File | Subset 1 | Subset 2 | Subset 3 | arXiv | Round |
+|---|---|---|---|---|---|
+| v4.1 | 0.5156 | 0.4796 | 0.4731 | 0.3368 | 0.4513 |
+| v4.2 | 0.5089 | 0.4810 | 0.4738 | 0.3452 | 0.4523 |
+| v4.3 | 0.5109 | 0.4843 | 0.4732 | 0.3461 | 0.4536 |
+| Official top of round 75 | | | | | 0.4518 |
+
+- The stack gained +0.0023 here, a little under the bench estimate (+0.003). Subset 1 lost 0.005–0.007: the ranker
+  lost there and gained on the other three subsets; the link rule and language split each moved subsets by
+  ±0.002 (net −0.0005 and +0.0007 on this round). One round does not overturn the bench evidence; kept.
+- v4.1 (= v4 code) scores 0.4513, level with the copies that led round 75 (0.4513–0.4518).
+- **v5** = v4.3 code + table retrained on rounds 40–75 (`tools/make_version.sh 5 75 19`).
