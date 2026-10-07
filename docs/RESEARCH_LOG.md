@@ -357,3 +357,29 @@ on set A (v3 settings), so single-run differences below ~0.004 are not evidence.
 - Starting at round 20 looked like a real gain here (+0.004), but it did not survive the realistic check: tables
   trained through round 68 and tested on rounds 69–74 score 0.4720 / 0.4704 from round 20 against 0.4721 / 0.4761 /
   0.4728 from round 40. Older rounds only help when the training window is short. Not adopted.
+
+## 2026-10-07 08:00 UTC — per-batch adaptation and learned merging (14-round bench)
+
+| Question | Social (42 subsets) | arXiv (14 subsets) |
+|---|---|---|
+| Current settings | 0.4557 | 0.3614 |
+| Best single (clusters, singleton share) for all subsets | 0.4571 | 0.3623 |
+| Oracle: best (clusters, singleton share) per subset | 0.4640 | 0.3652 |
+| Oracle: fine pieces of the tree merged by their majority ground-truth label (300 / 600 fine clusters) | 0.4939 / 0.5032 | 0.3774 / 0.3787 |
+
+- Per-batch setting choice is worth at most +0.008 and the best predictors (relative density, first-neighbour
+  distance) correlate only 0.3–0.4 with the per-subset optimum. Not pursued.
+- *Which pieces are merged* is worth up to +0.047 on social, so a merge rule was learned from past rounds:
+  pairs of fine clusters described by 14 features (centroid cosine in the smoothed / raw / classifier / TF-IDF
+  spaces, cross-neighbour links, mean pairwise similarity, cophenetic distance, sizes, mutual ranks, tightness);
+  trained on rounds 61–67, tested on 68–74.
+
+| Merge model (test rounds 68–74, social) | Pair AUC | Score |
+|---|---|---|
+| Uniform tree cut (current) | — | 0.4720 |
+| Gradient boosting, threshold chosen on training rounds | 0.708 | 0.4666 |
+| Logistic regression | 0.740 | 0.4658 |
+| Oracle pair labels | 1.0 | 0.5092 |
+
+arXiv: 0.3504 / 0.3665 vs 0.3685. The pair model cannot tell which pieces belong together any better than the
+average-linkage tree already does; rejected.
