@@ -332,3 +332,28 @@ on set A (v3 settings), so single-run differences below ~0.004 are not evidence.
   0.4805 vs 0.4800, so v1–v4 lost essentially nothing; future tables are saved correctly.
 - Three structurally different final stages (average linkage, HDBSCAN on the smoothed space, consensus) and two
   table formats all land on the same score. That is the ceiling of this embedding under this family of pipelines.
+
+## 2026-10-07 morning — larger bench (rounds 61–74 unseen, table trained on 40–60) and v4.1
+
+### Joint random search of all pipeline settings (odd rounds to search, even rounds to confirm)
+- Social (21 + 21 subsets): v4's settings are the best of 71 configurations on the search half (0.4689) and are not
+  beaten on the confirmation half.
+- arXiv (7 + 7 subsets, then 160 configurations on all 14): fewer final clusters is better. Marginal effect of the
+  cluster count: 80 → +0.0054, 120 → +0.0019, 180 (v4) → −0.0017, 260 → −0.0055.
+- **Adopted as v4.1:** arXiv 80 clusters, singleton share 0.30. 14 unseen arXiv subsets: 0.3624 vs 0.3561 (odd
+  +0.0055, even +0.0070, 9 of 14 better). End to end: rounds 69–73 0.4874 vs 0.4870; round 73 0.5247 vs 0.5233;
+  round 74 0.4180 vs 0.4171.
+- Singleton re-attachment at cosine 0.90–0.97 on 56 subsets: +0.0001 to −0.0053. Rejected for good.
+
+### Training options on the larger bench (v4.1 pipeline; three seeds of the current recipe: 0.4323 / 0.4336 / 0.4355)
+| Option | Round score |
+|---|---|
+| x/y/z loss weight 1.0 | 0.4322 |
+| No sparsity annealing | 0.4338 |
+| 40,960 × 64 table | 0.4335 |
+| 8 row-scale levels | 0.4319 |
+| Start training at round 30 / 20 (two seeds) / 10 / 1 instead of 40 | 0.4346 / 0.4381, 0.4376 / 0.4356 / 0.4355 |
+
+- Starting at round 20 looked like a real gain here (+0.004), but it did not survive the realistic check: tables
+  trained through round 68 and tested on rounds 69–74 score 0.4720 / 0.4704 from round 20 against 0.4721 / 0.4761 /
+  0.4728 from round 40. Older rounds only help when the training window is short. Not adopted.

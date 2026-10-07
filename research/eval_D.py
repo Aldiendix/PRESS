@@ -10,5 +10,5 @@ def job(i):
 if __name__ == "__main__":
     S.D = S.load(); arx = np.array([c["arx"] for c in S.D]); rnd = np.array([c["rnd"] for c in S.D])
     with ProcessPoolExecutor(int(sys.argv[4]) if len(sys.argv) > 4 else 7) as ex: r = np.array(list(ex.map(job, range(len(S.D)))))
-    f = lambda m: (3 * r[m & ~arx].mean() + r[m & arx].mean()) / 4
-    print("%s round %.4f (odd %.4f even %.4f) social %.4f arxiv %.4f" % (WP.split("/")[-1], f(rnd > 0), f(rnd % 2 == 1), f(rnd % 2 == 0), r[~arx].mean(), r[arx].mean()), flush=True)
+    import os as _o; keep = rnd >= int(_o.environ.get("MINR", "0")); r = np.where(keep, r, np.nan); f = lambda m: (3 * np.nanmean(r[m & ~arx]) + np.nanmean(r[m & arx])) / 4
+    print("%s round %.4f (odd %.4f even %.4f) social %.4f arxiv %.4f" % (WP.split("/")[-1], f(rnd > 0), f(rnd % 2 == 1), f(rnd % 2 == 0), np.nanmean(r[~arx]), np.nanmean(r[arx])), flush=True)
