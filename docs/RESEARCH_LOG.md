@@ -309,3 +309,26 @@ near-duplicate texts (0.4% of round-74 social texts have a cosine ≥ 0.8 match 
 drift, not repetition.
 
 **Plan for round 76:** `tools/make_version.sh 5 75` as soon as round 75's data is public (~15:30 UTC).
+
+## 2026-10-07 early — further attempts to beat v4 before round 75's data is public
+
+Run-to-run noise note: the same configuration retrained with a different thread count scored 0.4800 and 0.4839
+on set A (v3 settings), so single-run differences below ~0.004 are not evidence.
+
+| Tried | Result |
+|---|---|
+| Self-training classifier: LinearSVC, logistic regression (logits / probabilities), centroid cosine | all worse than ridge (−0.003 to −0.023) |
+| Self-training features: words only; bigger n-gram ranges (320k features); TF-IDF + student embedding | −0.009 to +0.003, mixed signs; +0.0006 / −0.0001 / +0.0013; −0.003 to −0.005 |
+| Singletons ranked partly within each cluster, or adjusted by cluster size | −0.002 to −0.019; ±0.002 |
+| HDBSCAN directly on the smoothed embedding (noise as singletons) | 0.4816 / 0.4173 vs 0.4877 / 0.4174 — a near tie with a different clusterer |
+| Combinations of HDBSCAN and average linkage (product partition, noise AND/OR density, splits) | best 0.4879 / 0.4174 / 0.5262 vs 0.4877 / 0.4174 / 0.5234 — no real gain |
+| Char-block weight ×0.5 / ×2; hash split 16,384 + 8,192 or 4,096 + 20,480 | 0.4803 / 0.4791 / 0.4731 / 0.4817 |
+| Batch size 3,072 | 0.4835 |
+| **New table format:** fixed pseudo-random support, only signs stored (1 bit per weight instead of ~7.4): 26 weights in every row | 0.4766 |
+| Same, with 12–96 weights per row allocated by row importance (three allocations) | 0.4750 / 0.4757 / 0.4796 |
+
+- **Bug fixed in `research/train.py`:** the saved column scales omitted the per-column mean |W| factor that the
+  training forward pass applies. Columns differ by at most 13%, and with identical training the fixed table scores
+  0.4805 vs 0.4800, so v1–v4 lost essentially nothing; future tables are saved correctly.
+- Three structurally different final stages (average linkage, HDBSCAN on the smoothed space, consensus) and two
+  table formats all land on the same score. That is the ceiling of this embedding under this family of pipelines.
