@@ -1,7 +1,0 @@
-# v10.2
-
-Wider table, from scratch, seed 2, rounds 40-80.
-
-- Table: `cache/W_v10_s2` (40,960 rows x 96), 19-bit packing.
-- Pipeline: v5/v6 stack (19-feature singleton ranker + language split + link-post rule); social 20% singletons, arXiv 80 clusters / 30%.
-- 49386 characters; tools/check.py: RESULT: PASS
